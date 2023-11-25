@@ -60,22 +60,27 @@ if debug:
 def run_BGP(socket):
     print("iniciando bpg ... \n")
     cola_inicial = copy.deepcopy(cola_de_rutas.queue)
-    tiempo_espera = 2
+    tiempo_espera = 100
     tiempo_inicio = time.time()
-    while time.time() - tiempo_inicio < tiempo_espera:
-        for ruta in cola_de_rutas.queue:
-            ruta_ASN = ruta["ruta_ASN"]
-            if len(ruta_ASN) == 2:  # es un vecino
-                print("\n se encontró un vecino...\n")
-                direccion_envio = (router_IP, int(ruta_ASN[0]))
-                # debemos enviar el mensaje de que inicien BGP
+    inicio = True
+    while True:
+        if time.time() - tiempo_inicio > tiempo_espera:
+            break
+        print("\nnueva vuelta del ciclo principal...\n")
+        vecinos = extraer_vecinos(cola_de_rutas.queue)
+        for vecino in vecinos:
+            vecino = vecino[0]
+            direccion_envio = (router_IP, int(vecino[0]))
+            # debemos enviar el mensaje de que inicien BGP
+            if inicio:
                 print("\n enviamos inicio BGP...\n")
                 socket.sendto(create_BGP_message().encode(), direccion_envio)
-                # enviamos nuestra tabla de rutas
-                print("\n enviamos tabla de rutas...\n")
-                socket.sendto(create_BGP_message(
-                    False).encode(), direccion_envio)
-                tiempo_inicio = time.time()
+                inicio = False
+            # enviamos nuestra tabla de rutas
+            print("\n enviamos tabla de rutas...\n")
+            socket.sendto(create_BGP_message(
+                False).encode(), direccion_envio)
+            tiempo_inicio = time.time()
 
         sale_por_mensaje = False
         while time.time() - tiempo_inicio < tiempo_espera:
@@ -134,8 +139,9 @@ def run_BGP(socket):
                                     cola_de_rutas.enqueue(
                                         diccionario)
                                 else:
-                                    print("la nueva ruta no era mas corta que la actual...")
-                   
+                                    print(
+                                        "la nueva ruta no era mas corta que la actual...")
+
         if comparar_listas_diccionarios(cola_inicial, cola_de_rutas.queue):
             print("la tabla de rutas no ha cambiado...\n")
             break
@@ -180,7 +186,7 @@ while True:
     ttl = paquete_ip.ttl
 
     if paquete_ip.mensaje == "START_BGP":  # si el mensaje es un mensaje de inicio de BGP
-        run_BGP(router)
+        print("Tabla de rutas actualizada:",run_BGP(router))
 
     else:
         if ttl > 0:  # agregamos condicion de que tenga vida para procesarlo

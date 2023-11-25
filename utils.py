@@ -8,6 +8,16 @@ cola_de_rutas = CircularQueue()  # al inicio es vacía
 debug = False
 
 # funciones varias  ===============================================
+def extraer_vecinos(cola):
+    vecinos = []
+    for valor in cola:
+        ruta_ASN = valor["ruta_ASN"]
+        if len(ruta_ASN) == 2 and ([ruta_ASN] not in vecinos):
+            vecinos.append([ruta_ASN])
+            
+    return vecinos
+
+
 def comparar_listas_diccionarios(lista1, lista2):
     lista1_ordenada = sorted(lista1, key=lambda x: sorted((k, str(v)) for k, v in x.items()))
     lista2_ordenada = sorted(lista2, key=lambda x: sorted((k, str(v)) for k, v in x.items()))
