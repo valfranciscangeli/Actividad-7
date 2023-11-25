@@ -8,7 +8,11 @@ cola_de_rutas = CircularQueue()  # al inicio es vacía
 debug = False
 
 # funciones varias  ===============================================
+def comparar_listas_diccionarios(lista1, lista2):
+    lista1_ordenada = sorted(lista1, key=lambda x: sorted((k, str(v)) for k, v in x.items()))
+    lista2_ordenada = sorted(lista2, key=lambda x: sorted((k, str(v)) for k, v in x.items()))
 
+    return lista1_ordenada == lista2_ordenada
 
 def eliminar_duplicados_paquetes(lista_paquetes):
     lista_sin_duplicados = []
@@ -76,7 +80,7 @@ def leer_archivo(nombre_archivo):
                 n_valores = len(linea)
                 diccionario = {
                     "red": linea[0],
-                    "ruta_ASN": [linea[1:n_valores-3]],
+                    "ruta_ASN": linea[1:n_valores-3],
                     "ip_siguiente_salto": linea[-3],
                     "puerto_siguiente_salto": int(linea[-2]),
                     "MTU": linea[-1]
@@ -91,13 +95,13 @@ def leer_archivo(nombre_archivo):
         return None
 
 
-# test
-if debug:
-    nombre_del_archivo = 'Conf_5_routers/rutas_R2_v3_mtu.txt'
-    resultado = leer_archivo(nombre_del_archivo)
+# # test
+# if debug:
+#     nombre_del_archivo = 'Conf_5_routers/rutas_R2_v3_mtu.txt'
+#     resultado = leer_archivo(nombre_del_archivo)
 
-    if resultado and debug:
-        print(resultado)
+#     if resultado and debug:
+#         print(resultado)
 
 
 # manejo de rutas ==============================================
@@ -105,6 +109,7 @@ if debug:
 def check_routes(routes_file_name, destination_address):
     global cola_de_rutas
     if cola_de_rutas.is_empty():
+        if debug: print("cola vacía, se procede a crearla...\n")
         cola_de_rutas = leer_archivo(routes_file_name)
     dest_ip = destination_address[0]
     dest_port = destination_address[1]
@@ -115,9 +120,9 @@ def check_routes(routes_file_name, destination_address):
     while contador < total_rutas:
         primera = cola_de_rutas.get_first()
         red = primera["red"]
-        pto_ini = primera["ruta_ASN"][1]
-        pto_fin = primera["ruta_ASN"][-1]
-        if dest_ip == red and pto_ini <= dest_port <= pto_fin:
+        pto_destino = int(primera["ruta_ASN"][0])
+        if debug: print(f"{dest_ip} == {red} and {pto_destino} == {dest_port}\n")
+        if dest_ip == red and pto_destino == dest_port:
             # encontramos la ruta buscada
             return primera["ip_siguiente_salto"], primera["puerto_siguiente_salto"], primera["MTU"]
 
@@ -128,14 +133,14 @@ def check_routes(routes_file_name, destination_address):
 
 
 # test:
-if debug:
-    archivo = "Conf_5_routers/rutas_R2_v3_mtu.txt"
-    assert check_routes(archivo,                         ("127.0.0.1", 8884)) == (
-        ('127.0.0.1', 8883), "50")
-    assert check_routes(archivo,
-                        ("127.0.0.1", 8880)) == None
-    assert check_routes(archivo,
-                        ("127.0.0.1", 8887)) == None
+# if debug:
+#     archivo = "Conf_5_routers/rutas_R2_v3_mtu.txt"
+#     assert check_routes(archivo,                         ("127.0.0.1", 8884)) == (
+#         ('127.0.0.1', 8883), "50")
+#     assert check_routes(archivo,
+#                         ("127.0.0.1", 8880)) == None
+#     assert check_routes(archivo,
+#                         ("127.0.0.1", 8887)) == None
 
 
 # funciones de fragmentacion =====================================================
@@ -285,27 +290,3 @@ if debug:
         IP_packet_v1 == IP_packet_v2))
 
 
-# funciones para BGP ==============================================================
-
-def create_BGP_message(init: bool = True, puerto=8888, ttl=10,  id=random.randint(0, 99999999)):
-    mensaje = "START_BGP"
-    if not init:
-        mensaje = ""
-    paquete_IP = PaqueteIP(puerto, ttl, id, 0, len(
-        mensaje.encode()), 0, mensaje)
-    return create_packet(paquete_IP)
-
-
-# test:
-# mensaje de inicio
-assert create_BGP_message(
-    id=111) == "127.0.0.1;8888;010;00000111;00000000;00000009;0;START_BGP"
-# mensaje con rutas
-assert create_BGP_message(
-    init=False, id=111) == "127.0.0.1;8888;010;00000111;00000000;00000000;0;"
-
-
-def run_BGP(router):
-    print("iniciando bpg ... \n")
-    while True:
-        break

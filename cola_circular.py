@@ -41,7 +41,10 @@ class CircularQueue:
         return first_value
 
     def __str__(self) -> str:
-        return str(self.queue)
+        final = "\n tabla de rutas: \n"
+        for valor in self.queue:
+            final += str(valor) + "\n"
+        return final
 
 # test:
 

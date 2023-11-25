@@ -1,6 +1,8 @@
 import sys
 import socket
 from utils import *
+import copy
+import time
 
 # debug? ==================================================
 debug: bool = False
@@ -15,9 +17,132 @@ router_rutas = argumentos[3]
 direccion_router_actual = (router_IP, router_puerto)
 buff_size = 4096
 
+if cola_de_rutas.is_empty():
+    cola_de_rutas = leer_archivo(router_rutas)
+
 if debug:
     print(
         f"direccion: {direccion_router_actual}, archivo de rutas: {router_rutas}")
+
+# funciones para BGP ==============================================================
+
+
+def create_BGP_message(init: bool = True):
+    ttl = 100
+    id = random.randint(0, 99999999)
+    mensaje = "START_BGP"
+    if not init:
+        mensaje = f"BGP_ROUTES\n{router_puerto}\n"
+        if cola_de_rutas.is_empty():
+            print("cola de rutas se encuentra vacia...\n")
+        if debug:
+            print("cola de rutas:", cola_de_rutas.queue)
+        for ruta in cola_de_rutas.queue:
+            ruta_ASN = ruta["ruta_ASN"]
+            ruta_ASN = ' '.join(map(str, ruta_ASN)).strip()
+            mensaje += f"{ruta_ASN}\n"
+
+        mensaje += "END_BGP_ROUTES"
+
+    paquete_IP = PaqueteIP(router_puerto, ttl, id, 0, len(
+        mensaje.encode()), 0, mensaje)
+    return create_packet(paquete_IP)
+
+
+# test:
+if debug:
+    # mensaje de inicio
+    print("mensaje BGP de inicio:", create_BGP_message())
+    # mensaje con rutas, la cola de rutas esta vacia en este punto
+    print("mensaje BGP de rutas:", create_BGP_message(init=False))
+
+
+def run_BGP(socket):
+    print("iniciando bpg ... \n")
+    cola_inicial = copy.deepcopy(cola_de_rutas.queue)
+    tiempo_espera = 2
+    tiempo_inicio = time.time()
+    while time.time() - tiempo_inicio < tiempo_espera:
+        for ruta in cola_de_rutas.queue:
+            ruta_ASN = ruta["ruta_ASN"]
+            if len(ruta_ASN) == 2:  # es un vecino
+                print("\n se encontró un vecino...\n")
+                direccion_envio = (router_IP, int(ruta_ASN[0]))
+                # debemos enviar el mensaje de que inicien BGP
+                print("\n enviamos inicio BGP...\n")
+                socket.sendto(create_BGP_message().encode(), direccion_envio)
+                # enviamos nuestra tabla de rutas
+                print("\n enviamos tabla de rutas...\n")
+                socket.sendto(create_BGP_message(
+                    False).encode(), direccion_envio)
+                tiempo_inicio = time.time()
+
+        sale_por_mensaje = False
+        while time.time() - tiempo_inicio < tiempo_espera:
+            print("\nesperamos recibir algun mensaje ...\n")
+            # revisamos si nos mandaron algo
+            recv_message, return_address = socket.recvfrom(buff_size)
+            if recv_message != None:  # si recibimos algo no vacio
+                paquete_ip = parse_packet(recv_message)
+                if "BGP_ROUTES" in paquete_ip.mensaje:  # si no es un mensaje de inicio de BGP
+                    print(
+                        f"\nse recibio un mensaje ...\nmensaje: {str(paquete_ip)}\n")
+                    sale_por_mensaje = True
+                    break
+
+        if sale_por_mensaje:
+            print("\nentramos a procesar las rutas recibidas...\n")
+            mensaje_dividido = paquete_ip.mensaje.split("\n")
+            # las lineas que contienen a las rutas ASN van desde el indice 2 hasta el -1
+            mensaje_dividido = mensaje_dividido[2:len(
+                mensaje_dividido)-1]
+            mensaje_dividido = [v.split(" ") for v in mensaje_dividido]
+
+            for valor in mensaje_dividido:
+                print(f"\nentramos a procesar la ruta {valor}...\n")
+                diccionario = {
+                    "red": "127.0.0.1",
+                    "ruta_ASN": valor + [str(router_puerto)],
+                    "ip_siguiente_salto": "127.0.0.1",
+                    "puerto_siguiente_salto": int(valor[-1]),
+                    "MTU": 1000
+                }
+
+                # significa que este router no se encuentra en la ruta
+                if str(router_puerto) in valor:
+                    print("\nruta descartada, somos parte ...\n")
+                else:
+                    lo_tengo = False
+                    for elemento in cola_de_rutas.queue:
+                        lo_tengo = valor[0] == elemento["ruta_ASN"][0]
+
+                    if not lo_tengo:  # no tengo ruta hacia ese router, así que debemos guardarla
+                        print("no teniamos el elemento, asi que lo guardamos...\n")
+                        cola_de_rutas.enqueue(diccionario)
+
+                    else:  # debo revisar si esta ruta nueva es mas corta
+                        print("ya teniamos el elemento...\n")
+
+                        print(
+                            "revisamos si esta ruta es mas corta que la que tenemos...\n")
+                        for elemento in cola_de_rutas.queue:
+                            ruta_actual = elemento["ruta_ASN"]
+                            if str(valor[0]) == str(ruta_actual[0]):
+                                if len(ruta_actual) > len(diccionario["ruta_ASN"]):
+                                    cola_de_rutas.queue.remove(
+                                        elemento)
+                                    cola_de_rutas.enqueue(
+                                        diccionario)
+                                else:
+                                    print("la nueva ruta no era mas corta que la actual...")
+                   
+        if comparar_listas_diccionarios(cola_inicial, cola_de_rutas.queue):
+            print("la tabla de rutas no ha cambiado...\n")
+            break
+        else:
+            print("la tabla de rutas es distinta...\n")
+            cola_inicial = copy.deepcopy(cola_de_rutas.queue)
+    return str(cola_de_rutas)
 
 
 # creacion del socket ============================================================
@@ -53,8 +178,8 @@ while True:
     paquete_ip = parse_packet(recv_message)  # retorna un paquete IP
     destination_address = (paquete_ip.ip, paquete_ip.puerto)
     ttl = paquete_ip.ttl
-    
-    if paquete_ip.mensaje == "START_BGP": #si el mensaje es un mensaje de inicio de BGP
+
+    if paquete_ip.mensaje == "START_BGP":  # si el mensaje es un mensaje de inicio de BGP
         run_BGP(router)
 
     else:
@@ -78,7 +203,8 @@ while True:
                 if paquete_reensamblado != None:
                     paquete_reensamblado = parse_packet(
                         paquete_reensamblado.encode())
-                    print("paquete completado:\n", paquete_reensamblado.mensaje)
+                    print("paquete completado:\n",
+                          paquete_reensamblado.mensaje)
                     # como ya llego completo liberamos este id del diccionario
                     del mis_paquetes[current_id]
                 else:
@@ -91,7 +217,8 @@ while True:
                     router_rutas, destination_address)
                 # revisamos si encontramos ruta de reenvio
                 if ruta_encontrada != None:
-                    direccion_next_hop = (ruta_encontrada[0], ruta_encontrada[1])
+                    direccion_next_hop = (
+                        ruta_encontrada[0], ruta_encontrada[1])
                     mtu = int(ruta_encontrada[2])
                     # vamos a disminuir el ttl antes de mandar
                     paquete_ip.ttl = ttl-1
@@ -102,7 +229,7 @@ while True:
                     fragmentos = fragment_IP_packet(paquete_completo, mtu)
                     if debug:
                         print("resultado de la fragmentación del paquete:",
-                            fragmentos, "\n")
+                              fragmentos, "\n")
 
                     for fragmento in fragmentos:
                         # hacemos forward
@@ -111,7 +238,8 @@ while True:
                             print(
                                 f"redirigiendo paquete {fragmento} con destino final {destination_address} desde {direccion_router_actual} hacia {direccion_next_hop}.\n")
 
-                            router.sendto(fragmento.encode(), direccion_next_hop)
+                            router.sendto(fragmento.encode(),
+                                          direccion_next_hop)
                         except socket.error as e:
                             print(f"Error al enviar datos: {e}")
 
